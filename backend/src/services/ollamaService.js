@@ -2,6 +2,7 @@ const { env } = require("../config/env");
 const ApiError = require("../utils/ApiError");
 
 const generateWithOllama = async (prompt, options = {}) => {
+  console.log("=== OLLAMA START ===");
   const response = await fetch(`${env.ollamaBaseUrl}/api/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -21,6 +22,7 @@ const generateWithOllama = async (prompt, options = {}) => {
   }
 
   const data = await response.json();
+  console.log("=== OLLAMA END ===");
   return data.response?.trim() || "";
 };
 

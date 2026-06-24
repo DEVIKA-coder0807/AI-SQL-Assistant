@@ -1,104 +1,129 @@
 import { useMemo, useState } from 'react'
 import { format } from 'date-fns'
 import { useQuery } from '@tanstack/react-query'
+import { ChevronLeft, ChevronRight, Search } from 'lucide-react'
 import { historyService } from '../services/historyService.js'
 import Topbar from '../components/ui/Topbar.jsx'
 import Sidebar from '../components/ui/Sidebar.jsx'
 import Card from '../components/ui/Card.jsx'
 
+const statusClasses = {
+  success: 'bg-emerald-400/10 text-emerald-200 ring-emerald-400/20',
+  error: 'bg-rose-400/10 text-rose-200 ring-rose-400/20',
+  pending: 'bg-cyan-400/10 text-cyan-200 ring-cyan-400/20',
+  GENERATED: 'bg-violet-400/10 text-violet-200 ring-violet-400/20',
+  VALIDATED: 'bg-cyan-400/10 text-cyan-200 ring-cyan-400/20',
+  EXECUTED: 'bg-emerald-400/10 text-emerald-200 ring-emerald-400/20',
+  FAILED: 'bg-rose-400/10 text-rose-200 ring-rose-400/20',
+  SAVED: 'bg-amber-400/10 text-amber-200 ring-amber-400/20',
+}
+
 export default function HistoryPage() {
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('all')
+  const [page, setPage] = useState(1)
 
-  const { data } = useQuery(['history', search, status], () => historyService.getHistory({ search, status }))
+  const { data } = useQuery({
+    queryKey: ['history', search, status, page],
+    queryFn: () => historyService.getHistory({ search, status, page }),
+  })
+  const payload = data?.data || data || {}
 
   const filteredHistory = useMemo(() => {
-    if (!data?.items) return []
-    return data.items.filter((item) => {
-      const matchesSearch = `${item.prompt} ${item.sql} ${item.user}`.toLowerCase().includes(search.toLowerCase())
+    const items = payload.items || []
+    return items.filter((item) => {
+      const matchesSearch = `${item.prompt || ''} ${item.sql || ''} ${item.user || ''}`.toLowerCase().includes(search.toLowerCase())
       const matchesStatus = status === 'all' || item.status === status
       return matchesSearch && matchesStatus
     })
-  }, [data, search, status])
+  }, [payload.items, search, status])
 
   return (
-    <div className="min-h-screen bg-slate-950 px-4 py-6 sm:px-6 lg:px-10">
-      <div className="mx-auto flex max-w-7xl gap-6 xl:gap-8">
+    <div className="aurora-bg min-h-screen px-4 py-5 sm:px-6 lg:px-8">
+      <div className="mx-auto flex max-w-7xl gap-5 xl:gap-7">
         <Sidebar />
-        <main className="flex-1 space-y-6">
-          <Topbar title="Query history" subtitle="Review what you generated" />
-          <section className="grid gap-6 xl:grid-cols-[1fr_280px]">
-            <div className="space-y-6">
-              <Card title="Search history">
-                <div className="grid gap-4 sm:grid-cols-[1fr_220px]">
-                  <input
-                    value={search}
-                    onChange={(event) => setSearch(event.target.value)}
-                    className="w-full rounded-3xl border border-slate-700/80 bg-slate-950/90 px-4 py-3 text-slate-100 outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-400/20"
-                    placeholder="Search prompts, SQL, or topics"
-                  />
-                  <select
-                    value={status}
-                    onChange={(event) => setStatus(event.target.value)}
-                    className="w-full rounded-3xl border border-slate-700/80 bg-slate-950/90 px-4 py-3 text-slate-100 outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-400/20"
-                  >
-                    <option value="all">All statuses</option>
-                    <option value="success">Success</option>
-                    <option value="error">Error</option>
-                    <option value="pending">Pending</option>
-                  </select>
-                </div>
-              </Card>
-              <Card title="Recent queries">
-                <div className="space-y-4">
-                  {filteredHistory.length > 0 ? (
-                    filteredHistory.map((item) => (
-                      <div key={item.id} className="rounded-3xl border border-slate-800 bg-slate-900/80 p-5">
-                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                          <div>
-                            <p className="text-sm text-slate-400">{format(new Date(item.createdAt), 'PPpp')}</p>
-                            <p className="mt-2 text-lg font-semibold text-white">{item.prompt}</p>
-                          </div>
-                          <span className={`rounded-full px-3 py-1 text-xs font-semibold ${item.status === 'success' ? 'bg-emerald-500/15 text-emerald-200' : item.status === 'error' ? 'bg-rose-500/15 text-rose-200' : 'bg-sky-500/15 text-sky-200'}`}>
-                            {item.status}
-                          </span>
-                        </div>
-                        <pre className="mt-4 max-h-40 overflow-auto rounded-3xl bg-slate-950/95 p-4 text-sm text-slate-200">
-                          {item.sql}
-                        </pre>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-sm leading-7 text-slate-400">No history matches your filters yet. Generate a query in the assistant to populate this page.</p>
-                  )}
-                </div>
-              </Card>
+        <main className="min-w-0 flex-1 space-y-6">
+          <Topbar title="Query history" subtitle="Audit trail" />
+
+          <Card title="Search and filter" eyebrow="History controls">
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px]">
+              <label className="relative block">
+                <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-brand-muted" />
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  className="premium-ring w-full rounded-2xl border border-white/10 bg-slate-950/70 py-3 pl-11 pr-4 text-white placeholder:text-slate-600"
+                  placeholder="Search prompts, SQL, or topics"
+                />
+              </label>
+              <select
+                value={status}
+                onChange={(event) => setStatus(event.target.value)}
+                className="premium-ring w-full rounded-2xl border border-white/10 bg-slate-950/70 px-4 py-3 text-white"
+              >
+                <option value="all">All statuses</option>
+                <option value="GENERATED">Generated</option>
+                <option value="VALIDATED">Validated</option>
+                <option value="EXECUTED">Executed</option>
+                <option value="FAILED">Failed</option>
+                <option value="SAVED">Saved</option>
+              </select>
             </div>
-            <Card title="Activity details">
-              <div className="space-y-4 text-slate-300">
-                <div className="rounded-3xl bg-slate-900/80 p-5">
-                  <p className="text-sm text-slate-400">Use filters to find past SQL generations and execution artifacts.</p>
-                </div>
-                <div className="rounded-3xl bg-slate-900/80 p-5">
-                  <p className="text-sm text-slate-400">Status breakdown</p>
-                  <div className="mt-3 space-y-3 text-sm">
-                    <div className="flex items-center justify-between text-white">
-                      <span>Success</span>
-                      <span>{data?.summary?.successCount ?? 0}</span>
-                    </div>
-                    <div className="flex items-center justify-between text-white">
-                      <span>Error</span>
-                      <span>{data?.summary?.errorCount ?? 0}</span>
-                    </div>
-                    <div className="flex items-center justify-between text-white">
-                      <span>Pending</span>
-                      <span>{data?.summary?.pendingCount ?? 0}</span>
-                    </div>
-                  </div>
-                </div>
+          </Card>
+
+          <Card title="Recent queries" eyebrow="Table">
+            <div className="overflow-hidden rounded-2xl border border-white/10">
+              <div className="hidden grid-cols-[1.1fr_1.5fr_140px_180px] gap-4 border-b border-white/10 bg-white/[0.04] px-5 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-brand-muted md:grid">
+                <span>Prompt</span>
+                <span>SQL</span>
+                <span>Status</span>
+                <span>Date</span>
               </div>
-            </Card>
-          </section>
+              <div className="divide-y divide-white/10">
+                {filteredHistory.length > 0 ? (
+                  filteredHistory.map((item) => (
+                    <article key={item.id} className="grid gap-4 px-5 py-4 md:grid-cols-[1.1fr_1.5fr_140px_180px] md:items-center">
+                      <div>
+                        <p className="line-clamp-2 text-sm font-medium text-white">{item.prompt || 'Manual SQL'}</p>
+                        <p className="mt-1 text-xs text-brand-muted">{item.id}</p>
+                      </div>
+                      <pre className="max-h-24 overflow-auto rounded-xl bg-slate-950/70 p-3 text-xs leading-5 text-slate-200">{item.sql}</pre>
+                      <span className={`w-fit rounded-full px-3 py-1 text-xs font-semibold ring-1 ${statusClasses[item.status] || 'bg-white/10 text-slate-200 ring-white/10'}`}>
+                        {item.status || 'pending'}
+                      </span>
+                      <p className="text-sm text-brand-muted">{item.createdAt ? format(new Date(item.createdAt), 'PP p') : 'N/A'}</p>
+                    </article>
+                  ))
+                ) : (
+                  <div className="px-5 py-12 text-center text-sm text-brand-muted">No history matches your filters yet.</div>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-brand-muted">
+                Page {page} of {payload.pagination?.pages || 1}
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPage((current) => Math.max(current - 1, 1))}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.05] text-white transition hover:bg-white/[0.09]"
+                  aria-label="Previous page"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPage((current) => current + 1)}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.05] text-white transition hover:bg-white/[0.09]"
+                  aria-label="Next page"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          </Card>
         </main>
       </div>
     </div>
