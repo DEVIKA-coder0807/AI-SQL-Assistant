@@ -1,0 +1,105 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum QueryStatus {
+  GENERATED
+  VALIDATED
+  EXECUTED
+  FAILED
+  SAVED
+}
+
+model User {
+  id              String           @id @default(uuid())
+  name            String           @db.VarChar(80)
+  email           String           @unique @db.VarChar(191)
+  password        String           @db.VarChar(255)
+  role            Role             @default(USER)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  queryHistory    QueryHistory[]
+  savedQueries    SavedQuery[]
+  queryExecutions QueryExecution[]
+  analytics       Analytics[]
+
+  @@index([email])
+}
+
+model QueryHistory {
+  id                String           @id @default(uuid())
+  userId            String
+  prompt            String?          @db.Text
+  sql               String           @db.Text
+  explanation       String?          @db.Text
+  optimizationNotes String?          @db.Text
+  status            QueryStatus      @default(GENERATED)
+  metadata          Json?
+  createdAt         DateTime         @default(now())
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  executions        QueryExecution[]
+  savedQuery        SavedQuery?
+
+  @@index([userId, createdAt])
+}
+
+model SavedQuery {
+  id             String        @id @default(uuid())
+  userId         String
+  historyId      String?       @unique
+  title          String        @db.VarChar(120)
+  description    String?       @db.VarChar(500)
+  sql            String        @db.Text
+  tags           Json
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  queryHistory   QueryHistory? @relation(fields: [historyId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+}
+
+model QueryExecution {
+  id              String        @id @default(uuid())
+  userId          String
+  historyId       String?
+  sql             String        @db.Text
+  rowCount        Int           @default(0)
+  durationMs      Int           @default(0)
+  success         Boolean       @default(true)
+  errorMessage    String?       @db.Text
+  impactSummary   Json?
+  createdAt       DateTime      @default(now())
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  queryHistory    QueryHistory? @relation(fields: [historyId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+}
+
+model Analytics {
+  id                    String   @id @default(uuid())
+  userId                String
+  totalGenerated        Int      @default(0)
+  totalValidated        Int      @default(0)
+  totalExecuted         Int      @default(0)
+  totalFailed           Int      @default(0)
+  totalSaved            Int      @default(0)
+  lastGeneratedAt       DateTime?
+  lastExecutedAt        DateTime?
+  averageExecutionMs    Int      @default(0)
+  updatedAt             DateTime @updatedAt
+  createdAt             DateTime @default(now())
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId])
+}
