@@ -3,6 +3,7 @@ const { prisma } = require("../config/database");
 const { env } = require("../config/env");
 const ApiError = require("../utils/ApiError");
 const { addLimitToSelect, hasMultipleStatements, isReadOnlyQuery, normalizeSql } = require("../utils/sqlSafety");
+const { getComplexityFromPlan } = require("./complexityService");
 
 const validateSqlSafety = (sql, allowMutation = false) => {
   if (!sql || typeof sql !== "string") {
@@ -27,7 +28,7 @@ const validateWithDatabase = async (sql, allowMutation = false) => {
     return {
       valid: true,
       normalizedSql,
-      message: "SQL is valid for PostgreSQL"
+      message: "SQL is valid for MySQL/PostgreSQL",
     };
   } catch (error) {
     return {
@@ -40,6 +41,7 @@ const validateWithDatabase = async (sql, allowMutation = false) => {
 };
 
 const analyzeImpact = async (sql, allowMutation = false) => {
+
   const validation = await validateWithDatabase(sql, allowMutation);
 
   if (!validation.valid) {
@@ -52,15 +54,18 @@ const analyzeImpact = async (sql, allowMutation = false) => {
     };
   }
 
+
   const plan = await prisma.$queryRawUnsafe(`EXPLAIN (FORMAT JSON) ${validation.normalizedSql}`);
-  const firstPlan = plan?.[0]?.["QUERY PLAN"]?.[0]?.Plan || null;
-  const totalCost = firstPlan?.["Total Cost"] || 0;
-  const planRows = firstPlan?.["Plan Rows"] || 0;
+  
+    const firstPlan = plan?.[0]?.["QUERY PLAN"]?.[0]?.Plan || null;
+    const complexity = getComplexityFromPlan(firstPlan);
+    const planRows = Number(firstPlan?.rows || 0);
+    const totalCost = 0;
   const readOnly = isReadOnlyQuery(validation.normalizedSql);
 
   let riskLevel = "low";
-  if (!readOnly || totalCost > 100000 || planRows > 100000) riskLevel = "high";
-  else if (totalCost > 10000 || planRows > 10000) riskLevel = "medium";
+  if (!readOnly ||  planRows > 100000) riskLevel = "high";
+  else if ( planRows > 10000) riskLevel = "medium";
 
   return {
     valid: true,
@@ -69,14 +74,37 @@ const analyzeImpact = async (sql, allowMutation = false) => {
       riskLevel,
       readOnly,
       estimatedRows: planRows,
-      estimatedCost: totalCost,
-      summary: `${readOnly ? "Read-only" : "Mutation"} query with ${riskLevel} estimated impact.`
+      estimatedCost: null,
+      summary: `${readOnly ? "Read-only" : "Mutation"} query with ${riskLevel} estimated impact.`,
+       complexity
+
     },
     plan
   };
 };
+const analyzeComplexity = async (sql) => {
+  const normalizedSql = normalizeSql(sql).replace(/;+\s*$/, "");
+
+  const plan = await prisma.$queryRawUnsafe(
+  `EXPLAIN ${normalizedSql}`
+);
+
+const firstPlan = plan?.[0] || null;
+
+  return getComplexityFromPlan(firstPlan);
+};
 
 const executeSql = async ({ userId, sql, historyId, allowMutation = false, limit = env.defaultQueryLimit }) => {
+  const normalizedSql = normalizeSql(sql).trim().toUpperCase();
+
+if (!normalizedSql.startsWith("SELECT")) {
+  return {
+    blocked: true,
+    success: false,
+    message:
+      "Only SELECT queries can be executed. Other SQL statements are blocked for security reasons."
+  };
+}
   validateSqlSafety(sql, allowMutation || env.allowMutationQueries);
 
   const safeLimit = Math.min(Number(limit) || env.defaultQueryLimit, env.maxQueryLimit);
@@ -124,6 +152,7 @@ const toPrismaJson = (value) => value === undefined ? Prisma.JsonNull : value;
 
 module.exports = {
   analyzeImpact,
+  analyzeComplexity,
   executeSql,
   toPrismaJson,
   validateSqlSafety,

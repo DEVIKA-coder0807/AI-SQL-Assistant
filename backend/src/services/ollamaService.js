@@ -1,163 +1,176 @@
 const { env } = require("../config/env");
 const ApiError = require("../utils/ApiError");
 
-const generateWithOllama = async (prompt, options = {}) => {
-  console.log("=== OLLAMA START ===");
-  console.log("URL:", `${env.ollamaBaseUrl}/api/generate`);
-  console.log("MODEL:", options.model || env.ollamaModel);
-  console.log("Before fetch");
-
-  const response = await fetch(`${env.ollamaBaseUrl}/api/generate`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: options.model || env.ollamaModel,
-      prompt,
-      stream: false,
-      options: {
-        temperature: options.temperature ?? 0.1,
-        num_predict: options.numPredict ?? 900,
-      },
-    }),
-  });
-
-  console.log("After fetch");
-
-  console.log("Status:", response.status);
-
-  const data = await response.json();
-
-  console.log("Response:", data);
-
-  if (!response.ok) {
-    throw new ApiError(502, "Ollama request failed", {
-      status: response.status,
-    });
-  }
-
-  console.log("=== OLLAMA END ===");
-
-  return data.response?.trim() || "";
+// ✅ Timeout wrapper
+const fetchWithTimeout = (url, options, timeoutMs = 60000) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal })
+    .finally(() => clearTimeout(timer));
 };
 
+// ✅ Core Ollama caller with retry
+const generateWithOllama = async (prompt, options = {}) => {
+  const maxRetries = 2;
+  let lastError;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`=== OLLAMA ATTEMPT ${attempt} ===`);
+
+      const response = await fetchWithTimeout(
+        `${env.ollamaBaseUrl}/api/generate`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: options.model || env.ollamaModel,
+            prompt,
+            stream: false,
+            options: {
+              temperature: options.temperature ?? 0.1,
+              num_predict: options.numPredict ?? 1200,
+            },
+          }),
+        },
+        options.timeoutMs || 90000
+      );
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new ApiError(502, `Ollama error: ${errText}`, {
+          status: response.status,
+        });
+      }
+
+      const data = await response.json();
+      const result = data.response?.trim() || "";
+
+      if (!result) {
+        throw new ApiError(502, "Ollama returned empty response");
+      }
+
+      console.log("=== OLLAMA SUCCESS ===");
+      return result;
+
+    } catch (err) {
+      lastError = err;
+
+      if (err.name === "AbortError") {
+        console.error(`Ollama timeout on attempt ${attempt}`);
+        lastError = new ApiError(504, "AI service timed out. Please try again.");
+      } else {
+        console.error(`Ollama attempt ${attempt} failed:`, err.message);
+      }
+
+      // Don't retry on last attempt
+      if (attempt < maxRetries) {
+        await new Promise(r => setTimeout(r, 1000 * attempt));
+      }
+    }
+  }
+
+  throw lastError;
+};
+
+// ✅ SQL extractor
 const extractSql = (text) => {
-  const fenced = text.match(/```sql\s*([\s\S]*?)```/i) || text.match(/```\s*([\s\S]*?)```/i);
+  const fenced =
+    text.match(/```sql\s*([\s\S]*?)```/i) ||
+    text.match(/```\s*([\s\S]*?)```/i);
   const raw = fenced ? fenced[1] : text;
   return raw.replace(/^sql\s*/i, "").trim().replace(/;+\s*$/, "");
 };
 
-const generateSql = async ({ question, schemaContext, dialect = "PostgreSQL" }) => {
-  const prompt = [
-    "You are a senior database engineer.",
-    `Generate one safe ${dialect} query for the user's request.`,
-    "Return only the SQL. Do not include markdown, prose, placeholders, or multiple statements.",
-    "Prefer SELECT queries. Never use DROP, TRUNCATE, ALTER, GRANT, REVOKE, or destructive SQL.",
-    schemaContext ? `Database schema context:\n${schemaContext}` : "No schema context was provided. Use clear, conventional table and column names.",
-    `User request:\n${question}`
-  ].join("\n\n");
+// ✅ Generate SQL — only existing tables/columns
+const generateSql = async ({ question, schemaContext, dialect = "MySQL" }) => {
+  if (!schemaContext) {
+    throw new ApiError(400, "Schema context is required to generate accurate SQL. Please provide your table structure.");
+  }
 
-  return extractSql(await generateWithOllama(prompt));
+  const prompt = `You are an expert MySQL SQL engineer.
+
+STRICT RULES:
+- Use ONLY the tables and columns defined in the schema below.
+- Do NOT invent or assume any table or column names.
+- Generate exactly ONE valid MySQL SELECT query.
+- Return ONLY the raw SQL query.
+- No explanations, no markdown, no \`\`\`sql blocks.
+- End with semicolon removed.
+
+DATABASE SCHEMA:
+${schemaContext}
+
+USER REQUEST:
+${question}
+
+SQL:`;
+
+  const raw = await generateWithOllama(prompt, {
+    temperature: 0.05,
+    numPredict: 500,
+    timeoutMs: 60000,
+  });
+
+  return extractSql(raw);
 };
 
+// ✅ Explain SQL
 const explainSql = async (sql) => {
- const prompt = `
-You are an expert SQL teacher.
-
-Explain the following SQL query in simple English so that a beginner can understand it.
-
-Follow this EXACT format and do not skip any section.
+  const prompt = `You are a SQL teacher. Explain this MySQL query briefly.
 
 # Purpose
-Explain in 1-2 sentences what this query does.
+What does this query do? (2 sentences max)
 
-# Tables Used
-Mention the table(s) used.
-
-# Columns Used
-List the columns involved. If * is used, mention that it selects all columns.
+# Tables & Columns
+Which tables and columns are used?
 
 # Conditions
-Explain every WHERE condition. If none, say "No conditions - all rows are returned."
+Any WHERE conditions or filters?
 
-# SQL Keywords
-Explain each keyword used:
-- SELECT: what it does
-- FROM: what it does
-- * (asterisk): what it means if used
-- WHERE: what it does if used
-- GROUP BY: what it does if used
-- ORDER BY: what it does if used
-- LIMIT: what it does if used
-
-# Step-by-Step Execution
-Explain how the database executes the query step by step.
-
-# Example Table
-Show a sample input table with 4-5 rows of realistic fake data.
-Use this EXACT markdown table format with pipe characters:
-
-| column1 | column2 | column3 |
-|---------|---------|---------|
-| value1  | value2  | value3  |
-| value1  | value2  | value3  |
-
-# Query Result
-Show which rows from the example table would be returned by this query.
-Use the same markdown table format.
-
-# Performance Tips
-Mention whether an index would help.
+# Example Result
+Show 3 sample rows in a markdown table.
 
 SQL:
-${sql}
+${sql}`;
 
-`;
-
-  const result = await generateWithOllama(prompt, {
-  temperature: 0.2,
-  numPredict: 1500,
-});
-
-console.log("EXPLAIN RESULT:");
-console.log(result);
-
-return result;
+  return generateWithOllama(prompt, {
+    temperature: 0.2,
+    numPredict: 800,
+    timeoutMs: 60000,
+  });
 };
 
+// ✅ Optimize SQL
 const optimizeSql = async ({ sql, schemaContext }) => {
-  const prompt = `
-You are an expert SQL performance advisor.
+  const prompt = `You are an expert MySQL performance advisor.
 
-Analyze the following SQL query and provide:
+Analyze this SQL query and provide:
 
 # Performance Issues
-List any performance problems with this query.
+List any performance problems.
 
 # Optimization Suggestions
-Give practical suggestions to improve this query.
-Use bullet points.
-Mention indexes, query rewrites, and risk tradeoffs.
+Practical suggestions with indexes, rewrites, and tradeoffs.
 
 # Optimized SQL
-Write an improved version of the query.
-Use this exact format:
-
 \`\`\`sql
--- optimized query here
+-- write optimized query here
 \`\`\`
 
 # Why It's Better
-Explain in simple points why the optimized version is better.
+Simple bullet points.
 
-${schemaContext ? `Schema context:\n${schemaContext}` : "No schema context was provided. Use conventional table and column names."}
+${schemaContext ? `Schema:\n${schemaContext}` : "No schema provided."}
 
 SQL:
-${sql}
-`;
+${sql}`;
 
-  return generateWithOllama(prompt, { temperature: 0.2, numPredict: 1500 });
+  return generateWithOllama(prompt, {
+    temperature: 0.2,
+    numPredict: 1200,
+    timeoutMs: 90000,
+  });
 };
 
 module.exports = { explainSql, generateSql, generateWithOllama, optimizeSql };

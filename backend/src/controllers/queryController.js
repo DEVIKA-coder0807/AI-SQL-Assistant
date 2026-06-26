@@ -2,7 +2,12 @@ const { prisma } = require("../config/database");
 const asyncHandler = require("../utils/asyncHandler");
 const { explainSql, generateSql, optimizeSql } = require("../services/ollamaService");
 const { incrementAnalytics } = require("../services/analyticsService");
-const { analyzeImpact, executeSql, validateWithDatabase } = require("../services/queryService");
+const {
+  analyzeImpact,
+  analyzeComplexity,
+  executeSql,
+  validateWithDatabase
+} = require("../services/queryService");
 
 const generateQuery = asyncHandler(async (req, res) => {
   try {
@@ -17,7 +22,7 @@ const generateQuery = asyncHandler(async (req, res) => {
       schemaContext,
       dialect,
     });
-
+    const complexity = await analyzeComplexity(sql);
     console.log("Generated SQL:");
     console.log(sql);
     const explanation = "Explanation will be generated later.";
@@ -52,6 +57,7 @@ const generateQuery = asyncHandler(async (req, res) => {
         id: history.id,
         sql,
         explanation,
+        complexity,
       },
     });
   } catch (err) {
@@ -65,6 +71,34 @@ const explainQuery = asyncHandler(async (req, res) => {
   console.log("Explain API Started");
 
   const { sql } = req.body;
+
+  if (!sql) {
+    return res.status(400).json({ success: false, message: "SQL is required" });
+  }
+
+  // Safety check — dangerous SQL explain nahi hoga
+  const { normalizeSql, hasMultipleStatements } = require("../utils/sqlSafety");
+  
+  const normalized = normalizeSql(sql).toLowerCase();
+  const blockedKeywords = ["drop", "truncate", "alter", "grant", "revoke"];
+  
+  const hasBlocked = blockedKeywords.some((keyword) =>
+    new RegExp(`\\b${keyword}\\b`, "i").test(normalized)
+  );
+
+  if (hasBlocked) {
+    return res.status(400).json({
+      success: false,
+      message: "Dangerous SQL cannot be explained. Only SELECT, INSERT, UPDATE, DELETE queries are allowed."
+    });
+  }
+
+  if (hasMultipleStatements(sql)) {
+    return res.status(400).json({
+      success: false,
+      message: "Only one SQL statement allowed at a time."
+    });
+  }
 
   const explanation = await explainSql(sql);
 
@@ -141,7 +175,12 @@ const executeQuery = asyncHandler(async (req, res) => {
     allowMutation,
     limit
   });
-
+  if (result.blocked) {
+  return res.json({
+    success: false,
+    data: result
+  });
+}
   await incrementAnalytics(req.user.id, "executed", result.durationMs);
 
   res.json({
