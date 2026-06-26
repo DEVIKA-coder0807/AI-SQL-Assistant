@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { Copy, Search, SlidersHorizontal } from 'lucide-react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Copy, Search, SlidersHorizontal, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { historyService } from '../services/historyService.js'
+import { sqlService } from '../services/sqlService.js'
 import Topbar from '../components/ui/Topbar.jsx'
 import Sidebar from '../components/ui/Sidebar.jsx'
 import Card from '../components/ui/Card.jsx'
@@ -12,11 +12,21 @@ export default function SavedQueriesPage() {
   const [sort, setSort] = useState('newest')
   const { data } = useQuery({
     queryKey: ['saved-queries', search],
-    queryFn: () => historyService.getSaved({ search }),
+    queryFn: () => sqlService.getSaved(),
   })
+  const queryClient = useQueryClient()
+
+const deleteMutation = useMutation({
+  mutationFn: (id) => sqlService.deleteSaved(id),
+  onSuccess: () => {
+    queryClient.invalidateQueries(['saved-queries'])
+    toast.success('Query deleted!')
+  },
+  onError: () => toast.error('Failed to delete query.'),
+})
 
   const savedQueries = useMemo(() => {
-    const items = data?.data?.items || data?.items || []
+    const items = data?.data?.data || data?.data || []
     return [...items].sort((a, b) => {
       if (sort === 'name') return String(a.title || a.name || '').localeCompare(String(b.title || b.name || ''))
       return new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
@@ -80,6 +90,14 @@ export default function SavedQueriesPage() {
                         >
                           <Copy className="h-4 w-4" />
                         </button>
+                        <button
+  type="button"
+  onClick={() => deleteMutation.mutate(query.id)}
+  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-red-500/30 bg-red-500/10 text-red-400 transition hover:bg-red-500/20"
+  aria-label="Delete query"
+>
+  <Trash2 className="h-4 w-4" />
+</button>
                       </div>
                       <pre className="max-h-48 overflow-auto rounded-2xl border border-white/10 bg-slate-950/75 p-4 text-xs leading-6 text-slate-200">{query.sql}</pre>
                       <div className="mt-auto flex flex-wrap gap-2">

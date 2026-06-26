@@ -23,8 +23,8 @@ const authLimiter = rateLimit({
 });
 
 const aiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 60,
+  windowMs: 1* 60 * 1000,
+  limit: 100,
   standardHeaders: "draft-8",
   legacyHeaders: false,
   message: {

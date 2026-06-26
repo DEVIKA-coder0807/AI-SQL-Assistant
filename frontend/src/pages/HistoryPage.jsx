@@ -27,10 +27,10 @@ export default function HistoryPage() {
     queryKey: ['history', search, status, page],
     queryFn: () => historyService.getHistory({ search, status, page }),
   })
-  const payload = data?.data || data || {}
+  const payload = data?.data ||  {}
 
   const filteredHistory = useMemo(() => {
-    const items = payload.items || []
+    const items = payload.items ||  payload.data?.items || []
     return items.filter((item) => {
       const matchesSearch = `${item.prompt || ''} ${item.sql || ''} ${item.user || ''}`.toLowerCase().includes(search.toLowerCase())
       const matchesStatus = status === 'all' || item.status === status

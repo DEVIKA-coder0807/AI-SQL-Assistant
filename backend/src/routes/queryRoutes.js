@@ -3,6 +3,7 @@ const { body } = require("express-validator");
 const {
   executeQuery,
   generateQuery,
+  explainQuery,
   impactQuery,
   optimizeQuery,
   validateQuery
@@ -25,6 +26,18 @@ router.post(
   ],
   validateRequest,
   generateQuery
+);
+router.post(
+  "/explain",
+  //aiLimiter,
+  [
+    body("sql")
+      .trim()
+      .isLength({ min: 1, max: 10000 })
+      .withMessage("SQL is required")
+  ],
+  validateRequest,
+  explainQuery
 );
 
 router.post(
@@ -49,7 +62,7 @@ router.post(
 
 router.post(
   "/optimize",
-  aiLimiter,
+  //aiLimiter,
   [
     body("sql").trim().isLength({ min: 1, max: 10000 }).withMessage("SQL is required"),
     body("schemaContext").optional().isString().isLength({ max: 10000 })

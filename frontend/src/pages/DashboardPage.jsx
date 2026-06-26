@@ -16,27 +16,52 @@ const fallbackTrend = [
   { date: 'Sun', queries: 38, executions: 29 },
 ]
 
-const statusData = [
-  { name: 'Success', value: 72, color: '#06B6D4' },
-  { name: 'Saved', value: 18, color: '#8B5CF6' },
-  { name: 'Failed', value: 10, color: '#F43F5E' },
-]
+
 
 const metricItems = [
-  { label: 'SQLs generated', value: '184', icon: Sparkles, tone: 'text-violet-200' },
-  { label: 'Executions', value: '114', icon: Zap, tone: 'text-cyan-200' },
-  { label: 'Saved queries', value: '29', icon: Save, tone: 'text-emerald-200' },
-  { label: 'Success rate', value: '92%', icon: TrendingUp, tone: 'text-amber-200' },
+  { label: 'SQLs generated', key: 'totalGenerated', value: '0', icon: Sparkles, tone: 'text-violet-200' },
+  { label: 'Executions', key: 'totalExecuted', value: '0', icon: Zap, tone: 'text-cyan-200' },
+  { label: 'Saved queries', key: 'totalSaved', value: '0', icon: Save, tone: 'text-emerald-200' },
+  { label: 'Success rate', key: 'successRate', value: '0%', icon: TrendingUp, tone: 'text-amber-200' },
 ]
 
 export default function DashboardPage() {
-  const { data: dashboard } = useQuery({ queryKey: ['dashboard-metrics'], queryFn: analyticsService.getDashboard })
-  const { data: trendData } = useQuery({ queryKey: ['query-trends'], queryFn: analyticsService.getTrends })
-  const { data: tableUsage } = useQuery({ queryKey: ['table-usage'], queryFn: analyticsService.getTables })
-
-  const trends = trendData?.data?.items || trendData?.data || fallbackTrend
-  const dashboardData = dashboard?.data || {}
+  const { data: dashboard } = useQuery({ 
+  queryKey: ['dashboard-metrics'], 
+  queryFn: analyticsService.getDashboard,
+  staleTime: 0,
+  cacheTime: 0,
+})
+const { data: trendData } = useQuery({ 
+  queryKey: ['query-trends'], 
+  queryFn: analyticsService.getTrends,
+  staleTime: 0,
+  cacheTime: 0,
+})
+const { data: tableUsage } = useQuery({ 
+  queryKey: ['table-usage'], 
+  queryFn: analyticsService.getTables,
+  staleTime: 0,
+  cacheTime: 0,
+})
+  const trends = Array.isArray(trendData?.data?.data) 
+  ? trendData.data.data 
+  : Array.isArray(trendData?.data) 
+    ? trendData.data 
+    : fallbackTrend
+  const dashboardData = dashboard?.data?.data || dashboard?.data || {}
   const tableData = tableUsage?.data || {}
+
+  const total = (dashboardData.totalExecuted || 0) + (dashboardData.totalSaved || 0)
+const successVal = total > 0 ? Math.round(((dashboardData.totalExecuted || 0) / total) * 100) : 0
+const savedVal = total > 0 ? Math.round(((dashboardData.totalSaved || 0) / total) * 100) : 0
+const failedVal = total > 0 ? Math.max(0, 100 - successVal - savedVal) : 0
+
+const statusData = [
+  { name: 'Success', value: successVal || 72, color: '#06B6D4' },
+  { name: 'Saved', value: savedVal || 18, color: '#8B5CF6' },
+  { name: 'Failed', value: failedVal || 10, color: '#F43F5E' },
+]
 
   return (
     <div className="aurora-bg min-h-screen px-4 py-5 sm:px-6 lg:px-8">
@@ -53,7 +78,7 @@ export default function DashboardPage() {
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <p className="text-sm text-brand-muted">{metric.label}</p>
-                      <p className="mt-3 text-3xl font-semibold text-white">{dashboardData[metric.label] || metric.value}</p>
+                      <p className="mt-3 text-3xl font-semibold text-white">{dashboardData[metric.key] ?? metric.value}</p>
                     </div>
                     <span className="grid h-11 w-11 place-items-center rounded-2xl border border-white/10 bg-white/[0.06]">
                       <Icon className={`h-5 w-5 ${metric.tone}`} />
@@ -117,9 +142,9 @@ export default function DashboardPage() {
             <Card title="Activity overview" eyebrow="Workspace">
               <div className="space-y-3">
                 {[
-                  { label: 'Most used table', value: tableData.mostUsed || 'customers', icon: Database },
-                  { label: 'Active users', value: dashboardData.activeUsers || 52, icon: Activity },
-                  { label: 'Avg response time', value: dashboardData.avgLatency || '420ms', icon: Clock3 },
+                  { label: 'Most used table', value: tableData?.data?.mostUsed || tableData?.mostUsed || 'N/A', icon: Database },
+                  { label: 'Total queries', value: dashboardData.totalGenerated || 0, icon: Activity },
+                  { label: 'Avg response time', value: dashboardData.avgLatency || 'N/A', icon: Clock3 },
                 ].map((item) => {
                   const Icon = item.icon
                   return (

@@ -7,6 +7,7 @@ const { apiLimiter } = require("./middleware/rateLimiter");
 const { errorHandler, notFoundHandler } = require("./middleware/errorHandler");
 const authRoutes = require("./routes/authRoutes");
 const queryRoutes = require("./routes/queryRoutes");
+const saveRoutes = require("./routes/saveRoutes");
 const historyRoutes = require("./routes/historyRoutes");
 const analyticsRoutes = require("./routes/analyticsRoutes");
 
@@ -53,6 +54,7 @@ app.get("/health", (req, res) => {
 
 app.use("/auth", authRoutes);
 app.use("/query", queryRoutes);
+app.use("/saved", saveRoutes);
 app.use("/history", historyRoutes);
 app.use("/analytics", analyticsRoutes);
 

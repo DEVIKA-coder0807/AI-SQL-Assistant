@@ -9,6 +9,8 @@ import { useQueryStore } from '../stores/queryStore.js'
 import Topbar from '../components/ui/Topbar.jsx'
 import Sidebar from '../components/ui/Sidebar.jsx'
 import Card from '../components/ui/Card.jsx'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 const quickPrompts = [
   'Show weekly active users and growth rate',
@@ -27,6 +29,8 @@ export default function AssistantPage() {
     mutationFn: sqlService.generateSql,
     onSuccess: (response) => {
       const result = response.data.data
+      console.log("Generate API Response:", result);
+     console.log("Generated SQL:", result.sql);
       setGeneratedSql(result.sql)
       setExplanation(result.explanation)
       setImpact(result.impact)
@@ -36,6 +40,39 @@ export default function AssistantPage() {
     },
     onError: () => toast.error('Unable to generate SQL. Try again later.'),
   })
+
+  const optimizeMutation = useMutation({
+  mutationFn: sqlService.optimizeSql,
+  onSuccess: (response) => {
+    console.log("Optimize response:", response.data);
+    setAlternatives([response.data.data.optimization]);
+    setActivePanel("optimize");
+    toast.success("Optimization generated");
+  },
+  onError: () => {
+    toast.error("Unable to optimize SQL");
+  },
+})
+
+  const explainMutation = useMutation({
+  mutationFn: sqlService.explainSql,
+
+  onSuccess: (response) => {
+  console.log("FULL RESPONSE");
+    console.log(response);
+    console.log(response.data);
+    console.log(response.data.data);
+
+    setExplanation(response.data.data.explanation);
+    setActivePanel("explanation");
+    toast.success("Explanation generated");
+},
+
+  onError: () => {
+    console.log(error);
+    toast.error("Unable to explain SQL")
+  },
+})
 
   const executeMutation = useMutation({
     mutationFn: sqlService.execute,
@@ -54,13 +91,19 @@ export default function AssistantPage() {
     generateMutation.mutate(payload)
   }
 
-  const onExecute = () => {
-    if (!generatedSql) {
-      toast.error('Generate SQL before executing.')
-      return
-    }
-    executeMutation.mutate({ sql: generatedSql })
+ const onExplain = () => {
+  console.log("Explain button clicked");
+  console.log("generatedSql =", generatedSql);
+
+  if (!generatedSql) {
+    toast.error("Generate SQL first.")
+    return
   }
+
+  explainMutation.mutate({
+    sql: generatedSql,
+  })
+}
 
   const copySql = async () => {
     if (!generatedSql) {
@@ -82,7 +125,7 @@ export default function AssistantPage() {
   const panelCopy = {
     generated: generatedSql || 'Generated SQL will appear here after you submit a prompt.',
     explanation: explanation || 'The assistant will explain the generated SQL structure after generation.',
-    optimize: alternatives.length > 0 ? alternatives.join('\n\n') : 'Optimization suggestions and alternative SQL will appear here when available.',
+   optimize: alternatives.length > 0 ? alternatives[0] : 'Click "Optimize Query" to get suggestions and optimized SQL.',
   }
 
   return (
@@ -152,10 +195,46 @@ export default function AssistantPage() {
             <Card title="Query actions" eyebrow="Tools">
               <div className="grid gap-3">
                 {[
-                  { label: 'Explain Query', icon: FileText, onClick: () => setActivePanel('explanation') },
-                  { label: 'Optimize Query', icon: Zap, onClick: () => setActivePanel('optimize') },
-                  { label: 'Save Query', icon: Save, onClick: () => toast.success('Save from History is available after query generation.') },
-                  { label: 'Execute Query', icon: Play, onClick: onExecute },
+                  {
+                      label: 'Explain Query',
+                      icon: FileText,
+                     onClick: () => {
+                      console.log("BUTTON PRESSED");
+                     onExplain();
+                    },
+},
+                 {
+  label: 'Optimize Query',
+  icon: Zap,
+  onClick: () => {
+    if (!generatedSql) {
+      toast.error("Generate SQL first.");
+      return;
+    }
+    optimizeMutation.mutate({ sql: generatedSql });
+  }
+},
+                  {
+  label: 'Save Query',
+  icon: Save,
+  onClick: async () => {
+    if (!generatedSql) {
+      toast.error("Generate SQL first.");
+      return;
+    }
+    try {
+      await sqlService.saveQuery({
+        sql: generatedSql,
+        title: `Query ${new Date().toLocaleString()}`,
+        tags: [],
+      });
+      toast.success("Query saved successfully!");
+    } catch (err) {
+      toast.error("Failed to save query.");
+    }
+  }
+},
+                  { label: 'Execute Query', icon: Play, onClick: () => toast("Execute coming soon")   },
                 ].map((action) => {
                   const Icon = action.icon
                   return (
@@ -220,14 +299,47 @@ export default function AssistantPage() {
                   </button>
                 ))}
               </div>
-              <motion.pre
-                key={activePanel}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="min-h-80 overflow-auto whitespace-pre-wrap rounded-2xl border border-white/10 bg-slate-950/80 p-5 text-sm leading-7 text-slate-100"
-              >
-                {panelCopy[activePanel]}
-              </motion.pre>
+              <motion.div
+  key={activePanel}
+  initial={{ opacity: 0, y: 8 }}
+  animate={{ opacity: 1, y: 0 }}
+  className="min-h-80 overflow-auto rounded-2xl border border-white/10 bg-slate-950/80 p-5 text-sm leading-7 text-slate-100"
+>
+  {activePanel === 'explanation' || activePanel === 'optimize' ? (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        h1: ({node, ...props}) => <h1 className="text-lg font-bold text-purple-400 mt-4 mb-2" {...props} />,
+        p: ({node, ...props}) => <p className="mb-3 text-slate-200" {...props} />,
+        ul: ({node, ...props}) => <ul className="list-disc pl-5 mb-3 text-slate-200" {...props} />,
+        li: ({node, ...props}) => <li className="mb-1" {...props} />,
+        strong: ({node, ...props}) => <strong className="text-white font-semibold" {...props} />,
+        table: ({node, ...props}) => (
+          <div className="overflow-x-auto my-4">
+            <table className="w-full border-collapse text-sm" {...props} />
+          </div>
+        ),
+        thead: ({node, ...props}) => <thead className="bg-white/10" {...props} />,
+        th: ({node, ...props}) => (
+          <th className="border border-white/20 px-4 py-2 text-left font-semibold text-white" {...props} />
+        ),
+        td: ({node, ...props}) => (
+          <td className="border border-white/20 px-4 py-2 text-slate-300" {...props} />
+        ),
+        tr: ({node, ...props}) => (
+          <tr className="hover:bg-white/5 transition" {...props} />
+        ),
+        code: ({node, ...props}) => (
+          <code className="bg-white/10 px-1 py-0.5 rounded text-purple-400 font-mono" {...props} />
+        ),
+      }}
+    >
+      {panelCopy[activePanel]}
+    </ReactMarkdown>
+  ) : (
+    <pre className="whitespace-pre-wrap font-mono">{panelCopy[activePanel]}</pre>
+  )}
+</motion.div>
             </Card>
 
             <div className="space-y-5">

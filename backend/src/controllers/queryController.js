@@ -5,26 +5,78 @@ const { incrementAnalytics } = require("../services/analyticsService");
 const { analyzeImpact, executeSql, validateWithDatabase } = require("../services/queryService");
 
 const generateQuery = asyncHandler(async (req, res) => {
-  const { question, schemaContext, dialect } = req.body;
-  const sql = await generateSql({ question, schemaContext, dialect });
+  try {
+    console.log("===== GENERATE QUERY START =====");
+
+    const { question, schemaContext, dialect } = req.body;
+
+    console.log("Question:", question);
+
+    const sql = await generateSql({
+      question,
+      schemaContext,
+      dialect,
+    });
+
+    console.log("Generated SQL:");
+    console.log(sql);
+    const explanation = "Explanation will be generated later.";
+   
+
+
+
+    console.log("Saving history...");
+    const history = await prisma.queryHistory.create({
+      data: {
+        userId: req.user.id,
+        prompt: question,
+        sql,
+        explanation,
+        status: "GENERATED",
+        metadata: {
+          dialect: dialect || "PostgreSQL",
+          schemaContextProvided: Boolean(schemaContext),
+        },
+      },
+    });
+    
+    console.log("History saved");
+
+    await incrementAnalytics(req.user.id, "generated");
+
+    console.log("===== GENERATE QUERY END =====");
+    console.log("Sending response...");
+    res.status(201).json({
+      success: true,
+      data: {
+        id: history.id,
+        sql,
+        explanation,
+      },
+    });
+  } catch (err) {
+    console.error("===== ERROR =====");
+    console.error(err);
+    throw err;
+  }
+});
+
+const explainQuery = asyncHandler(async (req, res) => {
+  console.log("Explain API Started");
+
+  const { sql } = req.body;
+
   const explanation = await explainSql(sql);
 
-  const history = await prisma.queryHistory.create({
-    data: {
-      userId: req.user.id,
-      prompt: question,
-      sql,
-      explanation,
-      status: "GENERATED",
-      metadata: { dialect: dialect || "PostgreSQL", schemaContextProvided: Boolean(schemaContext) }
-    }
-  });
+  console.log("Explain generated");
 
-  await incrementAnalytics(req.user.id, "generated");
+  console.log("Sending response...");
 
-  res.status(201).json({
+  return res.status(200).json({
     success: true,
-    data: { id: history.id, sql, explanation }
+    data: {
+      explanation,
+    },
   });
 });
 
@@ -60,25 +112,23 @@ const impactQuery = asyncHandler(async (req, res) => {
 });
 
 const optimizeQuery = asyncHandler(async (req, res) => {
+  console.log("Optimize API Started");
+
   const { sql, schemaContext } = req.body;
-  const suggestions = await optimizeSql({ sql, schemaContext });
 
-  const history = await prisma.queryHistory.create({
-    data: {
-      userId: req.user.id,
-      sql,
-      optimizationNotes: suggestions,
-      status: "GENERATED",
-      metadata: { optimized: true, schemaContextProvided: Boolean(schemaContext) }
-    }
-  });
+  if (!sql) {
+    return res.status(400).json({ success: false, message: "SQL is required" });
+  }
 
-  res.json({
+  const optimization = await optimizeSql({ sql, schemaContext });
+
+  console.log("Optimization generated");
+
+  return res.status(200).json({
     success: true,
     data: {
-      id: history.id,
-      suggestions
-    }
+      optimization,
+    },
   });
 });
 
@@ -103,6 +153,7 @@ const executeQuery = asyncHandler(async (req, res) => {
 module.exports = {
   executeQuery,
   generateQuery,
+  explainQuery,
   impactQuery,
   optimizeQuery,
   validateQuery
